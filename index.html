@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Займи чергу і відпочинь</title>
+    <title>Queue Alert Mobile</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
         
@@ -33,7 +33,7 @@
             position: relative;
             width: 100%;
             max-width: 400px;
-            height: 44vh;
+            height: 40vh;
             background: #000;
             border: 2px solid var(--border-color);
             border-radius: 12px;
@@ -88,6 +88,25 @@
         button:active { opacity: 0.8; }
         button.active { background: var(--accent-danger); }
 
+        .btn-stop-alarm {
+            width: 100%;
+            background: var(--accent-danger);
+            color: #ffffff;
+            font-size: 14px;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            display: none;
+            box-shadow: 0 0 15px rgba(220, 38, 38, 0.6);
+            animation: pulse-btn 0.5s infinite alternate;
+        }
+
+        @keyframes pulse-btn {
+            from { transform: scale(1); }
+            to { transform: scale(0.98); }
+        }
+
         .status-badge {
             font-size: 12px;
             padding: 8px;
@@ -136,7 +155,6 @@
             color: #a1a1aa;
         }
 
-        /* Чорний оверлей для економії заряду */
         #ecoOverlay {
             position: fixed;
             top: 0;
@@ -189,9 +207,11 @@
 
         <div class="row">
             <select id="soundSelect" style="width: 100%;">
-                <option value="beep">Звук: Імпульсний біп</option>
-                <option value="sawtooth">Звук: Пилка / Сирена</option>
-                <option value="siren">Звук: Двотональна тривога</option>
+                <option value="siren">🚨 Гучна сирена (Поліція)</option>
+                <option value="beep">🔔 Імпульсний біп (Частий)</option>
+                <option value="sawtooth">⚡ Стробоскоп / Пилка</option>
+                <option value="pulse">🔊 Ударний пульс (Низький)</option>
+                <option value="horn">🚢 Морський ріг / Тривога</option>
             </select>
         </div>
 
@@ -213,6 +233,12 @@
             </button>
             <button id="ecoBtn" onclick="enterEcoMode()" style="width: 50%; background: #374151;">
                 🌙 ЕКО-РЕЖИМ
+            </button>
+        </div>
+
+        <div class="row">
+            <button id="stopAlarmBtn" class="btn-stop-alarm" onclick="stopAlarmByUser()">
+                🛑 Я ПРОКИНУВСЯ (СТОП СИГНАЛ)
             </button>
         </div>
 
@@ -240,6 +266,7 @@
     const soundSelect = document.getElementById('soundSelect');
     const sensitivityInput = document.getElementById('sensitivity');
     const alarmToggleBtn = document.getElementById('alarmToggleBtn');
+    const stopAlarmBtn = document.getElementById('stopAlarmBtn');
     const ecoOverlay = document.getElementById('ecoOverlay');
 
     let currentStream = null;
@@ -248,12 +275,15 @@
     let startX = 0, startY = 0, currentX = 0, currentY = 0;
     let drawingMode = false;
     let systemActive = false;
+    let alarmTriggered = false; // Фіксація спрацювання тривоги
     let wakeLock = null;
 
     let audioCtx = null;
     let oscillator = null;
+    let oscillator2 = null;
     let gainNode = null;
     let alarmTimer = null;
+    let vibrateInterval = null;
     let isBeeping = false;
 
     let prevFrameData = null;
@@ -354,8 +384,9 @@
     function startAlarmSound() {
         if (isBeeping || !audioCtx) return;
         isBeeping = true;
-        exitEcoMode();
+        exitEcoMode(); // Виходимо з темного режиму при спрацюванні
 
+        stopAlarmBtn.style.display = 'block'; // Показуємо велику кнопку зупинки
         const selectedSound = soundSelect.value;
 
         if (selectedSound === 'siren') {
@@ -364,7 +395,7 @@
             gainNode = audioCtx.createGain();
             oscillator.type = 'sine';
             oscillator.frequency.setValueAtTime(600, audioCtx.currentTime);
-            gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime);
+            gainNode.gain.setValueAtTime(0.9, audioCtx.currentTime);
             oscillator.connect(gainNode);
             gainNode.connect(audioCtx.destination);
             oscillator.start();
@@ -372,37 +403,73 @@
             alarmTimer = setInterval(() => {
                 if (oscillator && audioCtx) {
                     high = !high;
-                    oscillator.frequency.setValueAtTime(high ? 900 : 600, audioCtx.currentTime);
+                    oscillator.frequency.setValueAtTime(high ? 1000 : 600, audioCtx.currentTime);
                 }
-            }, 250);
+            }, 220);
         } else if (selectedSound === 'beep') {
             const playBeep = () => {
                 if (!isBeeping) return;
                 let osc = audioCtx.createOscillator();
                 let g = audioCtx.createGain();
                 osc.type = 'sine';
-                osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+                osc.frequency.setValueAtTime(1400, audioCtx.currentTime);
                 g.gain.setValueAtTime(0.9, audioCtx.currentTime);
                 osc.connect(g);
                 g.connect(audioCtx.destination);
                 osc.start();
-                osc.stop(audioCtx.currentTime + 0.15);
+                osc.stop(audioCtx.currentTime + 0.12);
             };
             playBeep();
-            alarmTimer = setInterval(playBeep, 300);
-        } else {
+            alarmTimer = setInterval(playBeep, 250);
+        } else if (selectedSound === 'sawtooth') {
             oscillator = audioCtx.createOscillator();
             gainNode = audioCtx.createGain();
             oscillator.type = 'sawtooth';
-            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+            oscillator.frequency.setValueAtTime(900, audioCtx.currentTime);
             gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime);
             oscillator.connect(gainNode);
             gainNode.connect(audioCtx.destination);
             oscillator.start();
+        } else if (selectedSound === 'pulse') {
+            const playPulse = () => {
+                if (!isBeeping) return;
+                let osc = audioCtx.createOscillator();
+                let g = audioCtx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(250, audioCtx.currentTime);
+                g.gain.setValueAtTime(1.0, audioCtx.currentTime);
+                osc.connect(g);
+                g.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.2);
+            };
+            playPulse();
+            alarmTimer = setInterval(playPulse, 400);
+        } else if (selectedSound === 'horn') {
+            oscillator = audioCtx.createOscillator();
+            oscillator2 = audioCtx.createOscillator();
+            gainNode = audioCtx.createGain();
+            
+            oscillator.type = 'sawtooth';
+            oscillator2.type = 'square';
+            
+            oscillator.frequency.setValueAtTime(160, audioCtx.currentTime);
+            oscillator2.frequency.setValueAtTime(210, audioCtx.currentTime);
+            
+            gainNode.gain.setValueAtTime(0.85, audioCtx.currentTime);
+            
+            oscillator.connect(gainNode);
+            oscillator2.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            oscillator.start();
+            oscillator2.start();
         }
 
         if (navigator.vibrate) {
-            navigator.vibrate([500, 200, 500, 200, 500]);
+            vibrateInterval = setInterval(() => {
+                navigator.vibrate([400, 200, 400, 200]);
+            }, 1200);
         }
     }
 
@@ -415,6 +482,11 @@
             alarmTimer = null;
         }
 
+        if (vibrateInterval) {
+            clearInterval(vibrateInterval);
+            vibrateInterval = null;
+        }
+
         if (oscillator) {
             try {
                 oscillator.stop();
@@ -422,6 +494,22 @@
             } catch (e) {}
             oscillator = null;
         }
+
+        if (oscillator2) {
+            try {
+                oscillator2.stop();
+                oscillator2.disconnect();
+            } catch (e) {}
+            oscillator2 = null;
+        }
+    }
+
+    function stopAlarmByUser() {
+        alarmTriggered = false;
+        stopAlarmSound();
+        stopAlarmBtn.style.display = 'none';
+        statusDiv.className = "status-badge active";
+        statusDiv.innerText = "ОХОРОНА АКТИВНА (СПИМО)";
     }
 
     function checkMotion() {
@@ -469,16 +557,18 @@
 
         if (systemActive) {
             requestWakeLock();
-            alarmToggleBtn.innerText = "ЗУПИНИТИ";
+            alarmToggleBtn.innerText = "ЗУПИНИТИ МОНІТОРИНГ";
             alarmToggleBtn.style.background = "#dc2626";
             statusDiv.className = "status-badge active";
             statusDiv.innerText = "ОХОРОНА АКТИВНА (СПИМО)";
         } else {
             releaseWakeLock();
-            alarmToggleBtn.innerText = "УВІМКНУТИ";
+            alarmToggleBtn.innerText = "УВІМКНУТИ МОНІТОРИНГ";
             alarmToggleBtn.style.background = "var(--accent-success)";
             statusDiv.className = "status-badge";
             statusDiv.innerText = "МОНІТОРИНГ ЗУПИНЕНО";
+            alarmTriggered = false;
+            stopAlarmBtn.style.display = 'none';
             stopAlarmSound();
             exitEcoMode();
         }
@@ -564,14 +654,17 @@
 
         if (systemActive) {
             const hasMotion = checkMotion();
-            if (hasMotion) {
+
+            // Якщо виявлено рух, фіксуємо тривогу
+            if (hasMotion && !alarmTriggered) {
+                alarmTriggered = true;
+            }
+
+            // Зациклена тривога діє, поки водій не натисне кнопку скидання
+            if (alarmTriggered) {
                 statusDiv.className = "status-badge alarm";
                 statusDiv.innerText = "УВАГА! ЧЕРГА РУХАЄТЬСЯ!";
                 startAlarmSound();
-            } else {
-                statusDiv.className = "status-badge active";
-                statusDiv.innerText = "ОХОРОНА АКТИВНА (СПОКІЙНО)";
-                stopAlarmSound();
             }
         }
 
