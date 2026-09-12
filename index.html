@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Queue Alert Mobile</title>
+    <title>Займи чергу і відпочинь</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
         
@@ -26,14 +26,14 @@
             align-items: center;
             height: 100vh;
             padding: 6px;
-            overflow: hidden; /* Запобігає випадковому скролу */
+            overflow: hidden;
         }
 
         .phone-container {
             position: relative;
             width: 100%;
             max-width: 400px;
-            height: 52vh; /* Зменшено висоту камери, щоб усе вміщалося */
+            height: 44vh;
             background: #000;
             border: 2px solid var(--border-color);
             border-radius: 12px;
@@ -136,6 +136,25 @@
             color: #a1a1aa;
         }
 
+        /* Чорний оверлей для економії заряду */
+        #ecoOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #000000;
+            z-index: 9999;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #222222;
+            font-size: 13px;
+            text-align: center;
+            padding: 20px;
+        }
+
         .author-footer {
             margin-top: auto;
             padding: 6px 0 2px 0;
@@ -153,6 +172,11 @@
 </head>
 <body>
 
+    <div id="ecoOverlay" onclick="exitEcoMode()">
+        <p>⬛ ЕКОНОМІЯ БАТАРЕЇ АКТИВНА ⬛</p>
+        <p style="margin-top: 8px; font-size: 11px; color: #1a1a1a;">Торкніться екрана для виходу</p>
+    </div>
+
     <div class="phone-container">
         <video id="webcam" autoplay playsinline muted></video>
         <canvas id="overlay"></canvas>
@@ -161,6 +185,14 @@
     <div class="controls-panel">
         <div class="row">
             <select id="cameraSelect" onchange="switchCamera()"></select>
+        </div>
+
+        <div class="row">
+            <select id="soundSelect" style="width: 100%;">
+                <option value="beep">Звук: Імпульсний біп</option>
+                <option value="sawtooth">Звук: Пилка / Сирена</option>
+                <option value="siren">Звук: Двотональна тривога</option>
+            </select>
         </div>
 
         <div class="row">
@@ -176,8 +208,11 @@
         </div>
 
         <div class="row">
-            <button id="alarmToggleBtn" onclick="toggleAlarmSystem()" style="width: 100%; background: var(--accent-success); padding: 10px; font-size: 13px;">
+            <button id="alarmToggleBtn" onclick="toggleAlarmSystem()" style="width: 50%; background: var(--accent-success);">
                 УВІМКНУТИ МОНІТОРИНГ
+            </button>
+            <button id="ecoBtn" onclick="enterEcoMode()" style="width: 50%; background: #374151;">
+                🌙 ЕКО-РЕЖИМ
             </button>
         </div>
 
@@ -202,8 +237,10 @@
     const statusDiv = document.getElementById('status');
     const toggleZoneBtn = document.getElementById('toggleZoneBtn');
     const cameraSelect = document.getElementById('cameraSelect');
+    const soundSelect = document.getElementById('soundSelect');
     const sensitivityInput = document.getElementById('sensitivity');
     const alarmToggleBtn = document.getElementById('alarmToggleBtn');
+    const ecoOverlay = document.getElementById('ecoOverlay');
 
     let currentStream = null;
     let trackZone = null;
@@ -215,6 +252,8 @@
 
     let audioCtx = null;
     let oscillator = null;
+    let gainNode = null;
+    let alarmTimer = null;
     let isBeeping = false;
 
     let prevFrameData = null;
@@ -295,6 +334,14 @@
         }
     }
 
+    function enterEcoMode() {
+        ecoOverlay.style.display = 'flex';
+    }
+
+    function exitEcoMode() {
+        ecoOverlay.style.display = 'none';
+    }
+
     function initAudio() {
         if (!audioCtx) {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -306,34 +353,74 @@
 
     function startAlarmSound() {
         if (isBeeping || !audioCtx) return;
-        try {
+        isBeeping = true;
+        exitEcoMode();
+
+        const selectedSound = soundSelect.value;
+
+        if (selectedSound === 'siren') {
+            let high = false;
             oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            oscillator.type = 'sawtooth';
-            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
-            gainNode.gain.setValueAtTime(0.9, audioCtx.currentTime);
-            
+            gainNode = audioCtx.createGain();
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(600, audioCtx.currentTime);
+            gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime);
             oscillator.connect(gainNode);
             gainNode.connect(audioCtx.destination);
             oscillator.start();
-            isBeeping = true;
 
-            if (navigator.vibrate) {
-                navigator.vibrate([500, 200, 500, 200, 500]);
-            }
-        } catch (e) {
-            console.error(e);
+            alarmTimer = setInterval(() => {
+                if (oscillator && audioCtx) {
+                    high = !high;
+                    oscillator.frequency.setValueAtTime(high ? 900 : 600, audioCtx.currentTime);
+                }
+            }, 250);
+        } else if (selectedSound === 'beep') {
+            const playBeep = () => {
+                if (!isBeeping) return;
+                let osc = audioCtx.createOscillator();
+                let g = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+                g.gain.setValueAtTime(0.9, audioCtx.currentTime);
+                osc.connect(g);
+                g.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.15);
+            };
+            playBeep();
+            alarmTimer = setInterval(playBeep, 300);
+        } else {
+            oscillator = audioCtx.createOscillator();
+            gainNode = audioCtx.createGain();
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+            gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime);
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.start();
+        }
+
+        if (navigator.vibrate) {
+            navigator.vibrate([500, 200, 500, 200, 500]);
         }
     }
 
     function stopAlarmSound() {
-        if (!isBeeping || !oscillator) return;
-        try {
-            oscillator.stop();
-            oscillator.disconnect();
-            isBeeping = false;
-        } catch (e) {
-            console.error(e);
+        if (!isBeeping) return;
+        isBeeping = false;
+
+        if (alarmTimer) {
+            clearInterval(alarmTimer);
+            alarmTimer = null;
+        }
+
+        if (oscillator) {
+            try {
+                oscillator.stop();
+                oscillator.disconnect();
+            } catch (e) {}
+            oscillator = null;
         }
     }
 
@@ -382,17 +469,18 @@
 
         if (systemActive) {
             requestWakeLock();
-            alarmToggleBtn.innerText = "ЗУПИНИТИ МОНІТОРИНГ";
+            alarmToggleBtn.innerText = "ЗУПИНИТИ";
             alarmToggleBtn.style.background = "#dc2626";
             statusDiv.className = "status-badge active";
             statusDiv.innerText = "ОХОРОНА АКТИВНА (СПИМО)";
         } else {
             releaseWakeLock();
-            alarmToggleBtn.innerText = "УВІМКНУТИ МОНІТОРИНГ";
+            alarmToggleBtn.innerText = "УВІМКНУТИ";
             alarmToggleBtn.style.background = "var(--accent-success)";
             statusDiv.className = "status-badge";
             statusDiv.innerText = "МОНІТОРИНГ ЗУПИНЕНО";
             stopAlarmSound();
+            exitEcoMode();
         }
     }
 
